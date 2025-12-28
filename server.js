@@ -42,6 +42,11 @@ app.use(limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Root endpoint for health check
+app.get('/', (req, res) => {
+  res.json({ status: 'OK', message: 'Feedback System API is running', version: '1.0.0' });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Feedback System API is running' });
 });
