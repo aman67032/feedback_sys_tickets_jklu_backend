@@ -1,12 +1,9 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { Pool } = require('pg');
+const pool = require('../lib/db');
 const { authenticateToken, requireStudent, requireSubAdmin } = require('../middleware/auth');
 
 const router = express.Router();
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
 
 router.post('/', authenticateToken, requireStudent, [
   body('title').trim().isLength({ min: 5, max: 255 }),

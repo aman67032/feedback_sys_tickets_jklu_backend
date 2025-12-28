@@ -1,13 +1,10 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
-const { Pool } = require('pg');
+const pool = require('../lib/db');
 const { authenticateToken, requireSuperAdmin } = require('../middleware/auth');
 
 const router = express.Router();
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
 
 router.get('/users', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {

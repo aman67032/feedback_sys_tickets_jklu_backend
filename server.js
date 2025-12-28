@@ -3,36 +3,29 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
-const { Pool } = require('pg');
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Validate required environment variables
+// Check if running in serverless environment
+const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
+
+// Validate required environment variables (only exit if not serverless)
 if (!process.env.DATABASE_URL) {
   console.error('ERROR: DATABASE_URL environment variable is required');
-  process.exit(1);
+  if (!isServerless) {
+    process.exit(1);
+  }
 }
 
 if (!process.env.JWT_SECRET) {
   console.error('ERROR: JWT_SECRET environment variable is required');
-  process.exit(1);
+  if (!isServerless) {
+    process.exit(1);
+  }
 }
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
-});
-
-// Handle database connection errors
-pool.on('error', (err) => {
-  console.error('Unexpected error on idle database client', err);
-  process.exit(-1);
-});
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -42,7 +35,7 @@ const limiter = rateLimit({
 
 app.use(helmet());
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : (process.env.FRONTEND_URL || 'http://localhost:3000'),
   credentials: true
 }));
 app.use(limiter);
@@ -72,6 +65,12 @@ app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Only start listening if not in serverless environment
+if (!isServerless) {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+// Export app for Vercel serverless functions
+module.exports = app;
