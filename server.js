@@ -42,13 +42,52 @@ app.use(limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+const pool = require('./lib/db');
+
 // Root endpoint for health check
 app.get('/', (req, res) => {
   res.json({ status: 'OK', message: 'Feedback System API is running', version: '1.0.0' });
 });
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Feedback System API is running' });
+// Health check endpoint with database connectivity test
+app.get('/api/health', async (req, res) => {
+  const healthCheck = {
+    status: 'OK',
+    message: 'Feedback System API is running',
+    timestamp: new Date().toISOString(),
+    database: {
+      connected: false,
+      error: null
+    },
+    environment: {
+      nodeEnv: process.env.NODE_ENV || 'development',
+      isServerless: !!isServerless
+    }
+  };
+
+  // Test database connection
+  try {
+    const result = await pool.query('SELECT NOW() as current_time, version() as pg_version');
+    healthCheck.database.connected = true;
+    healthCheck.database.currentTime = result.rows[0].current_time;
+    healthCheck.database.pgVersion = result.rows[0].pg_version.split(' ')[0] + ' ' + result.rows[0].pg_version.split(' ')[1];
+    
+    // Test if tables exist
+    const tablesCheck = await pool.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name IN ('users', 'complaints', 'domains')
+    `);
+    healthCheck.database.tables = tablesCheck.rows.map(row => row.table_name);
+    
+    res.json(healthCheck);
+  } catch (error) {
+    healthCheck.status = 'ERROR';
+    healthCheck.database.connected = false;
+    healthCheck.database.error = error.message;
+    res.status(503).json(healthCheck);
+  }
 });
 
 const authRoutes = require('./routes/auth');

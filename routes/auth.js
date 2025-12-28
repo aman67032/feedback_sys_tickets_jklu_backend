@@ -24,9 +24,7 @@ router.post('/register', authLimiter, [
   body('email').isEmail().normalizeEmail(),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   body('name').trim().isLength({ min: 2 }),
-  body('role').isIn(['student', 'sub_admin']),
-  body('studentId').optional().isLength({ min: 5 }),
-  body('domainId').optional().isInt()
+  body('studentId').isLength({ min: 5 }).withMessage('Student ID must be at least 5 characters')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -34,28 +32,27 @@ router.post('/register', authLimiter, [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { email, password, name, role, studentId, domainId } = req.body;
+    const { email, password, name, studentId } = req.body;
+
+    // Registration is only for students
+    const role = 'student';
 
     const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existingUser.rows.length > 0) {
       return res.status(400).json({ error: 'User already exists' });
     }
 
-    if (role === 'sub_admin' && !domainId) {
-      return res.status(400).json({ error: 'Domain ID is required for sub-admin' });
-    }
-
-    if (role === 'student' && !studentId) {
-      return res.status(400).json({ error: 'Student ID is required for student registration' });
+    if (!studentId) {
+      return res.status(400).json({ error: 'Student ID is required' });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
 
     const result = await pool.query(`
       INSERT INTO users (email, password_hash, role, name, student_id, domain_id)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      VALUES ($1, $2, $3, $4, $5, NULL)
       RETURNING id, email, role, name, student_id, domain_id
-    `, [email, passwordHash, role, name, studentId, domainId]);
+    `, [email, passwordHash, role, name, studentId]);
 
     const user = result.rows[0];
     const token = generateToken(user.id);
