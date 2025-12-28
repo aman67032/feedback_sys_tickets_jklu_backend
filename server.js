@@ -86,6 +86,18 @@ app.get('/api/health', async (req, res) => {
     healthCheck.status = 'ERROR';
     healthCheck.database.connected = false;
     healthCheck.database.error = error.message;
+    
+    // Provide helpful error messages for common issues
+    if (error.message.includes('ENOTFOUND')) {
+      healthCheck.database.suggestion = 'Database hostname not found. Check if DATABASE_URL is correct and database is active in Neon dashboard.';
+    } else if (error.message.includes('timeout')) {
+      healthCheck.database.suggestion = 'Connection timeout. Check if database is active and network connectivity.';
+    } else if (error.message.includes('authentication')) {
+      healthCheck.database.suggestion = 'Authentication failed. Verify database credentials in DATABASE_URL.';
+    } else if (error.message.includes('SSL')) {
+      healthCheck.database.suggestion = 'SSL connection error. Ensure DATABASE_URL includes ?sslmode=require';
+    }
+    
     res.status(503).json(healthCheck);
   }
 });
