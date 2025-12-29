@@ -146,6 +146,7 @@ router.post('/users', authenticateToken, requireSuperAdmin, [
 router.put('/users/:id/toggle', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const { reason } = req.body || {};
 
     if (parseInt(id) === req.user.id) {
       return res.status(400).json({ error: 'Cannot disable your own account' });
@@ -161,11 +162,15 @@ router.put('/users/:id/toggle', authenticateToken, requireSuperAdmin, async (req
     await pool.query('UPDATE users SET is_active = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', 
       [newStatus, id]);
 
+    const newValues = newStatus
+      ? { is_active: newStatus }
+      : { is_active: newStatus, reason: reason || 'No reason provided' };
+
     await pool.query(`
       INSERT INTO audit_logs (user_id, action, resource_type, resource_id, old_values, new_values)
       VALUES ($1, $2, $3, $4, $5, $6)
     `, [req.user.id, newStatus ? 'ENABLE_USER' : 'DISABLE_USER', 'user', id, 
-        { is_active: !newStatus }, { is_active: newStatus }]);
+        { is_active: !newStatus }, newValues]);
 
     res.json({
       message: `User ${newStatus ? 'enabled' : 'disabled'} successfully`

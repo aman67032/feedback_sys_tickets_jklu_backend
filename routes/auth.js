@@ -104,13 +104,31 @@ router.post('/login', authLimiter, [
 
     const user = result.rows[0];
 
-    if (!user.is_active) {
-      return res.status(401).json({ error: 'Account is disabled' });
-    }
-
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    if (!user.is_active) {
+      // Look up the latest disable reason from audit logs
+      const reasonResult = await pool.query(`
+        SELECT new_values
+        FROM audit_logs
+        WHERE action = 'DISABLE_USER'
+          AND resource_type = 'user'
+          AND resource_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [user.id]);
+
+      const reasonJson = reasonResult.rows[0]?.new_values || {};
+      const reason = reasonJson.reason || 'Your account has been disabled by the administrator.';
+
+      return res.status(401).json({
+        error: 'Account is disabled',
+        disabled: true,
+        reason,
+      });
     }
 
     const token = generateToken(user.id);
