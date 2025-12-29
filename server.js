@@ -9,6 +9,9 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust proxy - required for rate limiting behind proxies (Vercel, etc.)
+app.set('trust proxy', true);
+
 // Check if running in serverless environment
 const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
 
