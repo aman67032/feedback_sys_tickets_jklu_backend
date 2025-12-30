@@ -10,7 +10,8 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Trust proxy - required for rate limiting behind proxies (Vercel, etc.)
-app.set('trust proxy', true);
+// Set to 1 to trust only the first proxy (Vercel's edge), not all proxies
+app.set('trust proxy', 1);
 
 // Check if running in serverless environment
 const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
