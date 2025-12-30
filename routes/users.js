@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../lib/db');
 const { authenticateToken, requireSuperAdmin } = require('../middleware/auth');
+const { convertKeysToCamelCase } = require('../lib/utils');
 
 const router = express.Router();
 
@@ -12,10 +13,14 @@ router.get('/domains', async (req, res) => {
       ORDER BY name
     `);
     
-    res.json({ domains: result.rows });
+    res.json({ domains: convertKeysToCamelCase(result.rows) });
   } catch (error) {
     console.error('Domains fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch domains' });
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      res.status(503).json({ error: 'Database connection failed. Please try again later.' });
+    } else {
+      res.status(500).json({ error: 'Failed to fetch domains' });
+    }
   }
 });
 
@@ -33,10 +38,14 @@ router.get('/profile', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({ user: result.rows[0] });
+    res.json({ user: convertKeysToCamelCase(result.rows[0]) });
   } catch (error) {
     console.error('Profile fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch profile' });
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      res.status(503).json({ error: 'Database connection failed. Please try again later.' });
+    } else {
+      res.status(500).json({ error: 'Failed to fetch profile' });
+    }
   }
 });
 
@@ -78,10 +87,14 @@ router.get('/stats', authenticateToken, async (req, res) => {
       `);
     }
 
-    res.json({ stats: statsQuery.rows[0] });
+    res.json({ stats: convertKeysToCamelCase(statsQuery.rows[0]) });
   } catch (error) {
     console.error('Stats fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch stats' });
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      res.status(503).json({ error: 'Database connection failed. Please try again later.' });
+    } else {
+      res.status(500).json({ error: 'Failed to fetch stats' });
+    }
   }
 });
 

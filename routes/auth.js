@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const pool = require('../lib/db');
+const { convertKeysToCamelCase } = require('../lib/utils');
 
 const router = express.Router();
 
@@ -64,20 +65,19 @@ router.post('/register', authLimiter, [
 
     res.status(201).json({
       message: 'User registered successfully',
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        name: user.name,
-        studentId: user.student_id,
-        domainId: user.domain_id
-      },
+      user: convertKeysToCamelCase(user),
       token
     });
 
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ error: 'Registration failed' });
+    if (error.code === '23505') { // Unique violation
+      res.status(400).json({ error: 'User already exists' });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      res.status(503).json({ error: 'Database connection failed. Please try again later.' });
+    } else {
+      res.status(500).json({ error: 'Registration failed' });
+    }
   }
 });
 
@@ -140,20 +140,24 @@ router.post('/login', authLimiter, [
 
     res.json({
       message: 'Login successful',
-      user: {
+      user: convertKeysToCamelCase({
         id: user.id,
         email: user.email,
         role: user.role,
         name: user.name,
-        studentId: user.student_id,
-        domainId: user.domain_id
-      },
+        student_id: user.student_id,
+        domain_id: user.domain_id
+      }),
       token
     });
 
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Login failed' });
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      res.status(503).json({ error: 'Database connection failed. Please try again later.' });
+    } else {
+      res.status(500).json({ error: 'Login failed' });
+    }
   }
 });
 

@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
 const pool = require('../lib/db');
 const { authenticateToken, requireSuperAdmin } = require('../middleware/auth');
+const { convertKeysToCamelCase } = require('../lib/utils');
 
 const router = express.Router();
 
@@ -75,7 +76,7 @@ router.get('/users', authenticateToken, requireSuperAdmin, async (req, res) => {
     const totalUsers = parseInt(countResult.rows[0].total);
 
     res.json({
-      users: result.rows,
+      users: convertKeysToCamelCase(result.rows),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -86,7 +87,11 @@ router.get('/users', authenticateToken, requireSuperAdmin, async (req, res) => {
 
   } catch (error) {
     console.error('Users fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch users' });
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      res.status(503).json({ error: 'Database connection failed. Please try again later.' });
+    } else {
+      res.status(500).json({ error: 'Failed to fetch users' });
+    }
   }
 });
 
@@ -134,25 +139,38 @@ router.post('/users', authenticateToken, requireSuperAdmin, [
 
     res.status(201).json({
       message: 'User created successfully',
-      user: result.rows[0]
+      user: convertKeysToCamelCase(result.rows[0])
     });
 
   } catch (error) {
     console.error('User creation error:', error);
-    res.status(500).json({ error: 'Failed to create user' });
+    if (error.code === '23505') { // Unique violation
+      res.status(400).json({ error: 'User already exists' });
+    } else if (error.code === '23503') { // Foreign key violation
+      res.status(400).json({ error: 'Invalid domain' });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      res.status(503).json({ error: 'Database connection failed. Please try again later.' });
+    } else {
+      res.status(500).json({ error: 'Failed to create user' });
+    }
   }
 });
 
 router.put('/users/:id/toggle', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = parseInt(id, 10);
+    if (isNaN(userId) || userId <= 0) {
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
+
     const { reason } = req.body || {};
 
-    if (parseInt(id) === req.user.id) {
+    if (userId === req.user.id) {
       return res.status(400).json({ error: 'Cannot disable your own account' });
     }
 
-    const userResult = await pool.query('SELECT is_active FROM users WHERE id = $1', [id]);
+    const userResult = await pool.query('SELECT is_active FROM users WHERE id = $1', [userId]);
     if (userResult.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -160,7 +178,7 @@ router.put('/users/:id/toggle', authenticateToken, requireSuperAdmin, async (req
     const newStatus = !userResult.rows[0].is_active;
 
     await pool.query('UPDATE users SET is_active = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', 
-      [newStatus, id]);
+      [newStatus, userId]);
 
     const newValues = newStatus
       ? { is_active: newStatus }
@@ -169,7 +187,7 @@ router.put('/users/:id/toggle', authenticateToken, requireSuperAdmin, async (req
     await pool.query(`
       INSERT INTO audit_logs (user_id, action, resource_type, resource_id, old_values, new_values)
       VALUES ($1, $2, $3, $4, $5, $6)
-    `, [req.user.id, newStatus ? 'ENABLE_USER' : 'DISABLE_USER', 'user', id, 
+    `, [req.user.id, newStatus ? 'ENABLE_USER' : 'DISABLE_USER', 'user', userId, 
         { is_active: !newStatus }, newValues]);
 
     res.json({
@@ -178,7 +196,11 @@ router.put('/users/:id/toggle', authenticateToken, requireSuperAdmin, async (req
 
   } catch (error) {
     console.error('User toggle error:', error);
-    res.status(500).json({ error: 'Failed to toggle user status' });
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      res.status(503).json({ error: 'Database connection failed. Please try again later.' });
+    } else {
+      res.status(500).json({ error: 'Failed to toggle user status' });
+    }
   }
 });
 
@@ -222,7 +244,7 @@ router.get('/audit-logs', authenticateToken, requireSuperAdmin, async (req, res)
     const result = await pool.query(query, params);
 
     res.json({
-      logs: result.rows,
+      logs: convertKeysToCamelCase(result.rows),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit)
@@ -231,7 +253,11 @@ router.get('/audit-logs', authenticateToken, requireSuperAdmin, async (req, res)
 
   } catch (error) {
     console.error('Audit logs fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch audit logs' });
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      res.status(503).json({ error: 'Database connection failed. Please try again later.' });
+    } else {
+      res.status(500).json({ error: 'Failed to fetch audit logs' });
+    }
   }
 });
 
@@ -278,15 +304,19 @@ router.get('/dashboard', authenticateToken, requireSuperAdmin, async (req, res) 
     ]);
 
     res.json({
-      userStats: userStats.rows[0],
-      complaintStats: complaintStats.rows[0],
-      domainStats: domainStats.rows,
-      recentActivity: recentActivity.rows
+      userStats: convertKeysToCamelCase(userStats.rows[0]),
+      complaintStats: convertKeysToCamelCase(complaintStats.rows[0]),
+      domainStats: convertKeysToCamelCase(domainStats.rows),
+      recentActivity: convertKeysToCamelCase(recentActivity.rows)
     });
 
   } catch (error) {
     console.error('Dashboard fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch dashboard data' });
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      res.status(503).json({ error: 'Database connection failed. Please try again later.' });
+    } else {
+      res.status(500).json({ error: 'Failed to fetch dashboard data' });
+    }
   }
 });
 
