@@ -3,6 +3,9 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
+const hpp = require('hpp');
+const mongoSanitize = require('express-mongo-sanitize');
+const { sanitizeRequestInputs, detectSQLInjection } = require('./middleware/security');
 
 dotenv.config();
 
@@ -35,16 +38,74 @@ const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
   message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
-app.use(helmet());
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : (process.env.FRONTEND_URL || 'http://localhost:3000'),
-  credentials: true
+// Enhanced Helmet configuration for better security
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  },
+  frameguard: { action: 'deny' },
+  noSniff: true,
+  xssFilter: true,
 }));
+
+// CORS with stricter configuration
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : (process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : ['http://localhost:3000']);
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 600 // 10 minutes
+}));
+
 app.use(limiter);
+
+// Protect against HTTP Parameter Pollution attacks
+app.use(hpp());
+
+// Data sanitization against NoSQL query injection
+app.use(mongoSanitize({
+  replaceWith: '_',
+  onSanitize: ({ req, key }) => {
+    console.warn(`Sanitized NoSQL injection attempt in key: ${key}`);
+  },
+}));
+
 app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Apply XSS protection and input sanitization
+app.use(sanitizeRequestInputs);
+
+// Detect SQL injection attempts
+app.use(detectSQLInjection);
 
 const pool = require('./lib/db');
 
@@ -116,9 +177,40 @@ app.use('/api/complaints', complaintRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 
+// Enhanced error handler that doesn't leak sensitive information
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong!' });
+  // Log full error for debugging (but not in production logs for security)
+  if (process.env.NODE_ENV !== 'production') {
+    console.error('Error details:', err.stack);
+  } else {
+    console.error('Error occurred:', err.message);
+  }
+  
+  // CORS errors
+  if (err.message && err.message.includes('CORS')) {
+    return res.status(403).json({ error: 'CORS policy violation' });
+  }
+  
+  // JWT errors
+  if (err.name === 'JsonWebTokenError') {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+  
+  if (err.name === 'TokenExpiredError') {
+    return res.status(401).json({ error: 'Token expired' });
+  }
+  
+  // Validation errors
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({ error: 'Invalid input data' });
+  }
+  
+  // Generic error - don't leak sensitive info
+  res.status(err.status || 500).json({ 
+    error: process.env.NODE_ENV === 'production' 
+      ? 'An error occurred processing your request' 
+      : err.message || 'Something went wrong!'
+  });
 });
 
 app.use('*', (req, res) => {
